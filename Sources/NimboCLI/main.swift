@@ -18,15 +18,28 @@ private func input() -> String? {
     return readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+private func apiKey() throws -> String {
+    if let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"].flatMap({ $0.isEmpty ? nil : $0 }) {
+        return key
+    }
+    throw NSError(domain: "NimboCLI", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY not set"])
+}
+
 private func runLoop() {
     print("\nChat with Nimbo (use 'ctrl-c' to quit)\n")
 
-    while let line = input() {
-        let input = line
+    guard let apiKey = try? apiKey() else {
+        fputs("Missing or empty OPENAI_API_KEY.\n", stderr)
+        exit(EXIT_FAILURE)
+    }
 
-        print("\(display("Nimbo", in: .green)): \(input)")
+    let agent = Agent(apiKey: apiKey, system: "You are Nimbo, a concise CLI assistant.") 
+
+    while let line = input() {
+        if line.isEmpty { continue }
+        let answer = agent.respond(line)
+        print("\(display("Nimbo", in: .green)): \(answer)")
     }
 }
 
 runLoop()
-

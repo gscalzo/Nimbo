@@ -10,19 +10,17 @@ let package = Package(
         .executable(name: "nimbo", targets: ["NimboCLI"])
     ],
     dependencies: [
-        // TODO: Add minimal dependencies when needed:
-        // .package(url: "https://github.com/jamesrochabrun/SwiftOpenAI", from: "0.8.0"),
+        .package(url: "https://github.com/jamesrochabrun/SwiftOpenAI", branch: "main"),
         // .package(url: "https://github.com/swiftlang/swift-subprocess", from: "0.0.3"),
     ],
     targets: [
         .executableTarget(
             name: "NimboCLI",
             dependencies: [
-                // "SwiftOpenAI",
+                "SwiftOpenAI",
                 // .product(name: "Subprocess", package: "swift-subprocess"),
             ],
             path: "Sources/NimboCLI"
         )
     ]
 )
-

@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Dispatch
 
 private enum AnsiColor: String {
     case reset = "\u{001B}[0m"
@@ -13,7 +14,7 @@ private func display(_ text: String, in color: AnsiColor) -> String {
 
 @discardableResult
 private func input() -> String? {
-    print("\(display("You", in: .blue)): ", terminator: "")  
+    print("\(display("You", in: .blue)): ", terminator: "")
     fflush(stdout)
     return readLine()?.trimmingCharacters(in: .whitespacesAndNewlines)
 }
@@ -25,21 +26,26 @@ private func apiKey() throws -> String {
     throw NSError(domain: "NimboCLI", code: 1, userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY not set"])
 }
 
-private func runLoop() {
+private func runLoop() async {
     print("\nChat with Nimbo (use 'ctrl-c' to quit)\n")
 
     guard let apiKey = try? apiKey() else {
         fputs("Missing or empty OPENAI_API_KEY.\n", stderr)
-        exit(EXIT_FAILURE)
+        return
     }
 
-    let agent = Agent(apiKey: apiKey, system: "You are Nimbo, a concise CLI assistant.") 
+    let agent = Agent(apiKey: apiKey, system: "You are Nimbo, a concise CLI assistant.")
 
     while let line = input() {
         if line.isEmpty { continue }
-        let answer = agent.respond(line)
+        let answer = await agent.respond(line)
         print("\(display("Nimbo", in: .green)): \(answer)")
     }
 }
 
-runLoop()
+Task {
+    await runLoop()
+    exit(EXIT_SUCCESS)
+}
+
+dispatchMain()

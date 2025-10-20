@@ -12,77 +12,67 @@ final class Agent {
         tools = [ReadFile()]
     }
 
-    func respond(_ text: String) -> String {
+    func respond(_ text: String) async -> String {
         history.append(.init(role: .user, content: .text(text)))
-        var output = ""
-        let g = DispatchGroup(); g.enter()
-        Task {
-            do {
-                // Single-pass tool flow: allow one tool invocation followed by a follow-up response.
-                let initialParams = ChatCompletionParameters(
+        do {
+            // Single-pass tool flow: allow one tool invocation followed by a follow-up response.
+            let initialParams = ChatCompletionParameters(
+                messages: history,
+                model: .gpt4omini,
+                toolChoice: .auto,
+                tools: tools.map { $0.chatTool }
+            )
+            let initialResponse = try await client.startChat(parameters: initialParams)
+            guard let initialMessage = initialResponse.choices?.first?.message else {
+                return "<error> Empty response from model."
+            }
+
+            if let calls = initialMessage.toolCalls, !calls.isEmpty {
+                let assistantToolMessage = ChatCompletionParameters.Message(
+                    role: .assistant,
+                    content: .text(initialMessage.content ?? ""),
+                    toolCalls: calls
+                )
+                history.append(assistantToolMessage)
+
+                for call in calls {
+                    let toolMsg = perform(call)
+                    history.append(toolMsg)
+                }
+
+                let followUpParams = ChatCompletionParameters(
                     messages: history,
                     model: .gpt4omini,
-                    toolChoice: .auto,
+                    toolChoice: ToolChoice.none,
                     tools: tools.map { $0.chatTool }
                 )
-                let initialResponse = try await client.startChat(parameters: initialParams)
-                guard let initialMessage = initialResponse.choices?.first?.message else {
-                    output = "<error> Empty response from model."
-                    g.leave()
-                    return
+                let followUpResponse = try await client.startChat(parameters: followUpParams)
+                guard let followUpMessage = followUpResponse.choices?.first?.message else {
+                    return "<error> Empty follow-up response from model."
                 }
 
-                if let calls = initialMessage.toolCalls, !calls.isEmpty {
-                    let assistantToolMessage = ChatCompletionParameters.Message(
-                        role: .assistant,
-                        content: .text(initialMessage.content ?? ""),
-                        toolCalls: calls
-                    )
-                    history.append(assistantToolMessage)
-                    for call in calls {
-                        let toolMsg = perform(call)
-                        history.append(toolMsg)
-                    }
-
-                    let followUpParams = ChatCompletionParameters(
-                        messages: history,
-                        model: .gpt4omini,
-                        toolChoice: ToolChoice.none,
-                        tools: tools.map { $0.chatTool }
-                    )
-                    let followUpResponse = try await client.startChat(parameters: followUpParams)
-                    guard let followUpMessage = followUpResponse.choices?.first?.message else {
-                        output = "<error> Empty follow-up response from model."
-                        g.leave()
-                        return
-                    }
-
-                    if let extraCalls = followUpMessage.toolCalls, !extraCalls.isEmpty {
-                        output = "<error> Model requested additional tool calls in single-pass mode."
-                        g.leave()
-                        return
-                    }
-
-                    output = followUpMessage.content ?? ""
-                    if !output.isEmpty {
-                        history.append(.init(role: .assistant, content: .text(output)))
-                    }
-                } else {
-                    output = initialMessage.content ?? ""
-                    if !output.isEmpty {
-                        history.append(.init(role: .assistant, content: .text(output)))
-                    }
+                if let extraCalls = followUpMessage.toolCalls, !extraCalls.isEmpty {
+                    return "<error> Model requested additional tool calls in single-pass mode."
                 }
-            } catch {
-                output = "<error> \(error.localizedDescription)"
+
+                let reply = followUpMessage.content ?? ""
+                if !reply.isEmpty {
+                    history.append(.init(role: .assistant, content: .text(reply)))
+                }
+                return reply
+            } else {
+                let reply = initialMessage.content ?? ""
+                if !reply.isEmpty {
+                    history.append(.init(role: .assistant, content: .text(reply)))
+                }
+                return reply
             }
-            g.leave()
+        } catch {
+            return "<error> \(error.localizedDescription)"
         }
-        g.wait()
-        return output
     }
 
-    private  func perform(_ call: ToolCall) -> ChatCompletionParameters.Message {
+    private func perform(_ call: ToolCall) -> ChatCompletionParameters.Message {
         let id = call.id ?? UUID().uuidString
         let toolName = call.function.name ?? "<nil>"
         let rawArgs = call.function.arguments
@@ -100,4 +90,3 @@ final class Agent {
         return .init(role: .tool, content: .text(result), toolCallID: id)
     }
 }
-

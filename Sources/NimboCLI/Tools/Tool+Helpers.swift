@@ -37,6 +37,25 @@ extension String {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         return cwd.appendingPathComponent(self)
     }
+
+    func countOccurrences(of substring: String) -> Int {
+        guard !substring.isEmpty else { return 0 }
+
+        var count = 0
+        var searchRange: Range<String.Index>? = startIndex..<endIndex
+
+        while let foundRange = range(of: substring, options: [], range: searchRange) {
+            count += 1
+            searchRange = foundRange.upperBound..<endIndex
+        }
+
+        return count
+    }
+
+    func truncated(to maxLength: Int) -> String {
+        guard maxLength >= 0, count > maxLength else { return self }
+        return String(prefix(maxLength))
+    }
 }
 
 extension URL {
@@ -70,5 +89,22 @@ extension URL {
             name.append("@")
         }
         return name
+    }
+
+    func ensureParentDirectoryExists() throws {
+        let directoryURL = deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+    }
+
+    func writeUTF8(_ string: String) throws {
+        try string.write(to: self, atomically: true, encoding: .utf8)
+    }
+
+    func readUTF8() throws -> String {
+        try String(contentsOf: self, encoding: .utf8)
     }
 }

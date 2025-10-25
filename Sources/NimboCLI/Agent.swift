@@ -9,7 +9,7 @@ final class Agent {
     init(apiKey: String, system: String) {
         client = OpenAIServiceFactory.service(apiKey: apiKey)
         history = [.init(role: .system, content: .text(system))]
-        tools = [ListFiles(), ReadFile()]
+        tools = [ListFiles(), ReadFile(), EditFile()]
     }
 
     func respond(_ text: String) async -> String {

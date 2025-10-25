@@ -14,46 +14,57 @@ final class Agent {
 
     func respond(_ text: String) async -> String {
         history.append(.init(role: .user, content: .text(text)))
+
         do {
-            let maxToolIterations = 8
-            var iteration = 0
+            for _ in 0..<Agent.maxToolIterations {
+                let response = try await requestCompletion()
+                let assistantMessage = try firstAssistantMessage(from: response)
+                appendAssistantMessage(assistantMessage)
 
-            while iteration < maxToolIterations {
-                let params = ChatCompletionParameters(
-                    messages: history,
-                    model: .gpt5Mini,
-                    toolChoice: .auto,
-                    tools: tools.map { $0.chatTool }
-                )
-
-                let response = try await client.startChat(parameters: params)
-                guard let message = response.choices?.first?.message else {
-                    return "<error> Empty response from model."
-                }
-
-                let textContent = message.content ?? ""
-                let assistantMessage = ChatCompletionParameters.Message(
-                    role: .assistant,
-                    content: .text(textContent),
-                    toolCalls: message.toolCalls
-                )
-                history.append(assistantMessage)
-
-                if let calls = message.toolCalls, !calls.isEmpty {
-                    iteration += 1
-                    for call in calls {
-                        let toolMsg = perform(call)
-                        history.append(toolMsg)
-                    }
+                if let calls = assistantMessage.toolCalls, !calls.isEmpty {
+                    executeToolCalls(calls)
                     continue
                 }
 
-                return textContent
+                return assistantMessage.content ?? ""
             }
 
-            return "<error> Exceeded maximum tool iterations."
+            throw AgentError.toolIterationLimitReached
+        } catch let error as AgentError {
+            return error.readableMessage
         } catch {
             return "<error> \(error.localizedDescription)"
+        }
+    }
+
+    private static let maxToolIterations = 8
+
+    private func requestCompletion() async throws -> ChatCompletionObject {
+        let params = ChatCompletionParameters(
+            messages: history,
+            model: .gpt5Mini,
+            toolChoice: .auto,
+            tools: tools.map { $0.chatTool }
+        )
+        return try await client.startChat(parameters: params)
+    }
+
+    private func firstAssistantMessage(from response: ChatCompletionObject) throws -> ChatCompletionObject.ChatChoice.ChatMessage {
+        guard let message = response.choices?.first?.message else {
+            throw AgentError.missingAssistantMessage
+        }
+        return message
+    }
+
+    private func appendAssistantMessage(_ message: ChatCompletionObject.ChatChoice.ChatMessage) {
+        let textContent = message.content ?? ""
+        history.append(.init(role: .assistant, content: .text(textContent), toolCalls: message.toolCalls))
+    }
+
+    private func executeToolCalls(_ calls: [ToolCall]) {
+        for call in calls {
+            let toolMessage = perform(call)
+            history.append(toolMessage)
         }
     }
 
@@ -73,5 +84,19 @@ final class Agent {
         }()
 
         return .init(role: .tool, content: .text(result), toolCallID: id)
+    }
+
+    private enum AgentError: Error {
+        case missingAssistantMessage
+        case toolIterationLimitReached
+
+        var readableMessage: String {
+            switch self {
+            case .missingAssistantMessage:
+                return "<error> Empty response from model."
+            case .toolIterationLimitReached:
+                return "<error> Exceeded maximum tool iterations."
+            }
+        }
     }
 }

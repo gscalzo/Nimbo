@@ -15,58 +15,43 @@ final class Agent {
     func respond(_ text: String) async -> String {
         history.append(.init(role: .user, content: .text(text)))
         do {
-            // Single-pass tool flow: allow one tool invocation followed by a follow-up response.
-            let initialParams = ChatCompletionParameters(
-                messages: history,
-                model: .gpt4omini,
-                toolChoice: .auto,
-                tools: tools.map { $0.chatTool }
-            )
-            let initialResponse = try await client.startChat(parameters: initialParams)
-            guard let initialMessage = initialResponse.choices?.first?.message else {
-                return "<error> Empty response from model."
-            }
+            let maxToolIterations = 8
+            var iteration = 0
 
-            if let calls = initialMessage.toolCalls, !calls.isEmpty {
-                let assistantToolMessage = ChatCompletionParameters.Message(
-                    role: .assistant,
-                    content: .text(initialMessage.content ?? ""),
-                    toolCalls: calls
-                )
-                history.append(assistantToolMessage)
-
-                for call in calls {
-                    let toolMsg = perform(call)
-                    history.append(toolMsg)
-                }
-
-                let followUpParams = ChatCompletionParameters(
+            while iteration < maxToolIterations {
+                let params = ChatCompletionParameters(
                     messages: history,
-                    model: .gpt4omini,
-                    toolChoice: ToolChoice.none,
+                    model: .gpt5Mini,
+                    toolChoice: .auto,
                     tools: tools.map { $0.chatTool }
                 )
-                let followUpResponse = try await client.startChat(parameters: followUpParams)
-                guard let followUpMessage = followUpResponse.choices?.first?.message else {
-                    return "<error> Empty follow-up response from model."
+
+                let response = try await client.startChat(parameters: params)
+                guard let message = response.choices?.first?.message else {
+                    return "<error> Empty response from model."
                 }
 
-                if let extraCalls = followUpMessage.toolCalls, !extraCalls.isEmpty {
-                    return "<error> Model requested additional tool calls in single-pass mode."
+                let textContent = message.content ?? ""
+                let assistantMessage = ChatCompletionParameters.Message(
+                    role: .assistant,
+                    content: .text(textContent),
+                    toolCalls: message.toolCalls
+                )
+                history.append(assistantMessage)
+
+                if let calls = message.toolCalls, !calls.isEmpty {
+                    iteration += 1
+                    for call in calls {
+                        let toolMsg = perform(call)
+                        history.append(toolMsg)
+                    }
+                    continue
                 }
 
-                let reply = followUpMessage.content ?? ""
-                if !reply.isEmpty {
-                    history.append(.init(role: .assistant, content: .text(reply)))
-                }
-                return reply
-            } else {
-                let reply = initialMessage.content ?? ""
-                if !reply.isEmpty {
-                    history.append(.init(role: .assistant, content: .text(reply)))
-                }
-                return reply
+                return textContent
             }
+
+            return "<error> Exceeded maximum tool iterations."
         } catch {
             return "<error> \(error.localizedDescription)"
         }
